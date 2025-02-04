@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Map</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <style>
+        #map { height: 500px; width: 100%; }
+    </style>
+</head>
+<body class="bg-gray-100 p-4">
+    
+    <div class="container mx-auto">
+        <h1 class="text-2xl font-bold text-center mb-4">Interactive Map</h1>
+        
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <!-- Map Section -->
+            <div class="bg-white p-4 rounded-lg shadow-lg">
+                <div id="map"></div>
+            </div>
+
+            <!-- Control Panel -->
+            <div class="bg-white p-4 rounded-lg shadow-lg">
+                <div class="grid grid-cols-1 gap-4">
+                    <div>
+                        <h3 class="font-semibold">Add Point</h3>
+                        <input type="text" id="pointName" class="w-full p-2 border rounded mt-1" placeholder="Point Name">
+                        <input type="number" id="latitude" class="w-full p-2 border rounded mt-1" placeholder="Latitude">
+                        <input type="number" id="longitude" class="w-full p-2 border rounded mt-1" placeholder="Longitude">
+                        <button id="addPointBtn" class="w-full bg-blue-500 text-white p-2 rounded mt-2">Add Point</button>
+                    </div>
+
+                    <div>
+                        <h3 class="font-semibold">Add Path</h3>
+                        <select id="startPoint" class="w-full p-2 border rounded mt-1"></select>
+                        <select id="endPoint" class="w-full p-2 border rounded mt-1"></select>
+                        <button id="addPathBtn" class="w-full bg-green-500 text-white p-2 rounded mt-2">Create Path</button>
+                    </div>
+
+                    <div>
+                        <h3 class="font-semibold">Delete Point</h3>
+                        <select id="deletePoint" class="w-full p-2 border rounded mt-1"></select>
+                        <button id="deletePointBtn" class="w-full bg-red-500 text-white p-2 rounded mt-2">Delete Point</button>
+                    </div>
+
+                    <div>
+                        <h3 class="font-semibold">Delete Path</h3>
+                        <select id="deletePath" class="w-full p-2 border rounded mt-1"></select>
+                        <button id="deletePathBtn" class="w-full bg-red-600 text-white p-2 rounded mt-2">Delete Path</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let map = L.map('map').setView([12.7523769, 80.1986775], 20);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+        let points = [];
+        let paths = [];
+
+        function loadMapData() {
+            $.ajax({
+                url: '/get_data',
+                type: 'GET',
+                dataType: 'json',
+                success: function(response) {
+                    points = response.points;
+                    paths = response.paths;
+
+                    map.eachLayer(function(layer) {
+                        if (!!layer.toGeoJSON) { map.removeLayer(layer); }
+                    });
+
+                    points.forEach(point => {
+                        L.marker([point.lat, point.lon]).addTo(map).bindPopup(point.name);
+                    });
+
+                    paths.forEach(path => {
+                        let latlngs = [[path.start.lat, path.start.lon], [path.end.lat, path.end.lon]];
+                        L.polyline(latlngs, { color: 'red' }).addTo(map);
+                    });
+
+                    updateSelectOptions();
+                },
+                error: function() {
+                    alert("Failed to load map data.");
+                }
+            });
+        }
+
+        function updateSelectOptions() {
+            let pointSelect = $("#startPoint, #endPoint, #deletePoint");
+            let pathSelect = $("#deletePath");
+
+            pointSelect.empty();
+            pathSelect.empty();
+
+            points.forEach(point => {
+                pointSelect.append(`<option value="${point.name}">${point.name}</option>`);
+            });
+
+            paths.forEach((path, index) => {
+                pathSelect.append(`<option value="${index}">${path.start.name} ➝ ${path.end.name}</option>`);
+            });
+        }
+
+        $("#addPointBtn").click(function() {
+            let name = $("#pointName").val().trim();
+            let lat = parseFloat($("#latitude").val());
+            let lon = parseFloat($("#longitude").val());
+
+            if (!name || isNaN(lat) || isNaN(lon)) {
+                alert("Please enter valid details.");
+                return;
+            }
+
+            $.ajax({
+                url: '/add_point',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ name, lat, lon }),
+                success: function(response) {
+                    alert(response.message);
+                    loadMapData();
+                },
+                error: function() {
+                    alert("Error adding point.");
+                }
+            });
+        });
+
+        $("#addPathBtn").click(function() {
+            let start = $("#startPoint").val();
+            let end = $("#endPoint").val();
+
+            if (!start || !end || start === end) {
+                alert("Please select two different points.");
+                return;
+            }
+
+            let startPoint = points.find(p => p.name === start);
+            let endPoint = points.find(p => p.name === end);
+
+            $.ajax({
+                url: '/add_path',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ start: startPoint, end: endPoint }),
+                success: function(response) {
+                    alert(response.message);
+                    loadMapData();
+                },
+                error: function() {
+                    alert("Error adding path.");
+                }
+            });
+        });
+
+        $("#deletePointBtn").click(function() {
+            let name = $("#deletePoint").val();
+            if (!name) return;
+
+            $.ajax({
+                url: '/delete_point',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ name }),
+                success: function(response) {
+                    alert(response.message);
+                    loadMapData();
+                },
+                error: function() {
+                    alert("Error deleting point.");
+                }
+            });
+        });
+
+        $("#deletePathBtn").click(function() {
+            let index = $("#deletePath").val();
+            if (index === null) return;
+
+            let path = paths[index];
+
+            $.ajax({
+                url: '/delete_path',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ start: path.start.name, end: path.end.name }),
+                success: function(response) {
+                    alert(response.message);
+                    loadMapData();
+                },
+                error: function() {
+                    alert("Error deleting path.");
+                }
+            });
+        });
+
+        loadMapData();
+    </script>
+
+</body>
+</html>
